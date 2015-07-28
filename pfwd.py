@@ -87,6 +87,28 @@ def initialize_server_socket(sock, address_or_port, listen):
 #             #
 ###############
 
+############
+# SocketEx #
+############
+class SocketEx(socket.socket):
+    """Extended socket class.  Used to hold onto metadata."""
+
+    def __init__(self, family=socket.AF_INET, type_=socket.SOCK_STREAM, proto=0):
+        socket.socket.__init__(self, family, type, proto)
+
+        self.__family   = family
+        self.__type     = type_
+        self.__protocol = proto
+
+    def get_family(self):
+        return self.__family
+
+    def get_type(self):
+        return self.__type
+
+    def get_protocol(self):
+        return self.__protocol
+
 ##################
 # IndirectSocket #
 ##################
@@ -286,15 +308,40 @@ class SocketBridgePair(object):
         """
         self.get_primary().close()
 
+################
+# BaseThreadEx #
+################
+class BaseThreadEx(threading.Thread):
+
+    # Constructor ############################################################
+    def __init__(self):
+        threading.Thread.__init__(self)
+        self.__should_stay_alive = True
+
+    # should_stay_alive ######################################################
+    def should_stay_alive(self):
+        """If your thread is running in a loop, use this to determine whether
+        or not it should stay alive."""
+        return self.__should_stay_alive
+
+    # kill_passively #########################################################
+    def kill_passively(self):
+        """States the intent that you no longer want this thread to run."""
+        self.__should_stay_alive = False
+
 ############################
 # PortToSocketBridgeServer #
 ############################
-class PortToSocketBridgeServer(threading.Thread):
-    """A class that bridges inbound ports with outbound sockets."""
+class PortToSocketBridgeServer(BaseThreadEx):
+    """A class that bridges inbound ports with outbound sockets.
+
+    Each port that we listen to needs to be tied to its own thread so
+    we can listen on several ports simultaneously.
+    """
 
     # Constructor ############################################################
     def __init__(self, in_trans_type, in_address, out_trans_type, out_address, listen=5):
-        threading.Thread.__init__(self)
+        BaseThreadEx.__init__(self)
 
         # Outbound socket information.
         self.__out_socket_type  = to_socket_type(out_trans_type)
@@ -304,7 +351,7 @@ class PortToSocketBridgeServer(threading.Thread):
         self.__server_socket_type = to_socket_type(in_trans_type)
         self.__server_address     = to_address(in_address)
         self.__server_listen      = listen
-        self.__server_socket  = None
+        self.__server_socket      = None
 
         # Prepare a socket to listen on the inbound port.
         self.__create_server_socket()
@@ -318,3 +365,20 @@ class PortToSocketBridgeServer(threading.Thread):
             initialize_server_socket(self.__server_socket,
                                      self.__server_address,
                                      self.__server_listen)
+
+    def __create_outbound_socket(self):
+        sock = socket.socket(socket.AF_INET, self.__out_socket_type)
+        sock.connect
+
+    def get_server_socket(self):
+        return self.__server_socket
+
+    # run ####################################################################
+    def run(self):
+        """Thread entry point."""
+        while self.should_stay_alive():
+
+            # Wait for an incoming connection.
+            connection_socket, addr = self.get_server_socket().accept()
+            print "Received incoming connection from {0}".format(addr)
+            pass
