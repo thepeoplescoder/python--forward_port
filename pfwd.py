@@ -8,6 +8,10 @@ import tempfile
 import os
 import warnings
 
+# Personal imports
+import devnull
+from dummysocket import DummySocket
+
 # Some warnings can be annoying.  Uncomment this to disable them.
 # warnings.simplefilter("ignore")
 
@@ -45,7 +49,7 @@ def to_socket_type(trans_type):
 def to_address(addr):
     """Converts a socket address or port to a tuple.  Tuples are assumed to be valid."""
 
-    # If this is a string, convert it to a valid tuple.
+    # If this is a string, convert it to a valid tuple: (address, port)
     if isinstance(addr, basestring):
         addr = tuple(addr.split(':')[:2])
         addr[1] = int(addr[1])
@@ -54,15 +58,16 @@ def to_address(addr):
     elif isinstance(addr, int):
         addr = ("", addr)
 
-    if not isinstance(addr, tuple) or len(addr) != 2:
-        raise TypeError("A tuple of length 2 was expected here.")
-    else:
+    # This function MUST return a tuple of length 2.
+    if isinstance(addr, tupble) and len(addr) == 2:
         return addr
+    else:
+        raise TypeError("A tuple of length 2 was expected here.")
 
-#############################
-# initialize_inbound_socket #
-#############################
-def initialize_inbound_socket(sock, address_or_port, listen):
+############################
+# initialize_server_socket #
+############################
+def initialize_server_socket(sock, address_or_port, listen):
     if sock is not None:
         sock.bind(to_address(address_or_port))
         sock.listen(listen)
@@ -73,26 +78,201 @@ def initialize_inbound_socket(sock, address_or_port, listen):
 #             #
 ###############
 
-######################
-# PortToSocketBridge #
-######################
-class PortToSocketBridge(object):
+##################
+# IndirectSocket #
+##################
+class IndirectSocket(object):
+    """Adds another level of indirection to a socket object.
+
+    My justification for having a class such as this is because the full
+    duplex communication will be done using a pair of SocketBridge objects that
+    will ultimately be sharing the same socket objects, and this simplifies
+    the disposal logic.
+    """
+
+    # Constructor ############################################################
+    def __init__(self, sock=None):
+        if not isinstance(sock, socket.socket):
+            sock = DummySocket.SOCKET
+        self.__socket = sock
+
+    # socket #################################################################
+    def socket(self):
+        """The socket object associated with this IndirectSocket."""
+        return self.__socket
+
+    # is_valid_socket ########################################################
+    def is_valid_socket(self):
+        """Returns true if this object refers to a valid socket, otherwise false."""
+        return isinstance(self.socket(), socket.socket) and \
+               not isinstance(self.socket(), DummySocket)
+
+    # close ##################################################################
+    def close(self):
+        """Invalidates this object and closes the associated socket."""
+        self.socket().close()
+        self.__socket = DummySocket.SOCKET
+
+################
+# SocketBridge #
+################
+class SocketBridge(object):
+
+    # Constructor ############################################################
+    def __init__(self, fsock, tsock):
+
+        # Convert any sockets to indirect sockets.
+        if isinstance(fsock, socket.socket):
+            fsock = IndirectSocket(fsock)
+        if isinstance(tsock, socket.socket):
+            tsock = IndirectSocket(tsock)
+
+        self.__from_socket_indirect = fsock
+        self.__to_socket_indirect   = tsock
+        self.__twin                 = None
+
+    # get_from_socket_indirect ###############################################
+    def get_from_socket_indirect(self):
+        """Gets the "from" IndirectSocket object associated with this bridge."""
+        return self.__from_socket_indirect
+
+    # get_to_socket_indirect #################################################
+    def get_to_socket_indirect(self):
+        """Gets the "to" IndirectSocket object associated with this bridge."""
+        return self.__to_socket_indirect
+
+    # get_from_socket ########################################################
+    def get_from_socket(self):
+        """Gets the actual "from" socket."""
+        return self.get_from_socket_indirect().socket()
+
+    # get_to_socket ##########################################################
+    def get_to_socket(self):
+        """Gets the actual "to" socket."""
+        return self.get_to_socket_indirect().socket()
+
+    # close ##################################################################
+    def close(self):
+        """Closes this bridge, releasing its associated sockets."""
+        self.get_from_socket_indirect().close()
+        self.get_to_socket_indirect().close()
+
+    # is_valid_bridge ########################################################
+    def is_valid_bridge(self):
+        """Checks to see if this bridge is valid.
+
+        A valid bridge is a bridge such that its to and from sockets are
+        not dummy sockets.
+        """
+        return self.get_from_socket_indirect().is_valid_socket() and \
+               self.get_to_socket_indirect().is_valid_socket()
+
+    # is_valid_twin ##########################################################
+    def is_valid_twin(self, t):
+        """Checks to see if the given SocketBridge is a potential twin.
+
+        The constraint is that this SocketBridge's direction of communication
+        must move in the exact opposite of the other SocketBridge's
+        direction.  Also, they must use the same IndirectSocket objects.
+        """
+        if isinstance(t, SocketBridge):
+            if self.get_from_socket_indirect() is t.get_to_socket_indirect():
+                if self.get_to_socket_indirect() is t.get_from_socket_indirect():
+                    return True
+        return False
+
+    # get_twin ###############################################################
+    def get_twin(self):
+        """Gets the "twin" SocketBridge associated with this instance."""
+        return self.__twin
+
+    # set_twin ###############################################################
+    def set_twin(self, t=None):
+        """Sets the twin for this SocketBridge, if it is a potential twin.
+
+        The other SocketBridge object uses this object as its twin.
+        """
+        if self.is_valid_twin(t) and self.get_twin() is None:
+            self.__twin = t
+            t.__twin    = self
+
+    # create_twin ############################################################
+    def create_twin(self):
+        """Creates a twin SocketBridge object that conforms to the constraints
+        required to be a valid twin.
+
+        Until a twin is actually set, this method will continue to create a
+        completely new twin object.  The work to prevent this did not seem
+        worthwhile.
+        """
+
+        if self.get_twin() is not None:
+            return self.get_twin()
+        else:
+            return SocketBridge(self.get_to_socket_indirect(),
+                                self.get_from_socket_indirect())
+
+####################
+# SocketBridgePair #
+####################
+class SocketBridgePair(object):
+
+    # Constructor ############################################################
+    def __init__(self, bridge):
+        self.__primary_bridge   = bridge
+        self.__secondary_bridge = bridge.create_twin()
+
+    # get_primary ############################################################
+    def get_primary(self):
+        """Gets the primary SocketBridge object.
+
+        The only difference between the primary and secondary SocketBridge
+        objects is their direction of communication.  Neither object has
+        priority over the other.
+        """
+        return self.__primary_bridge
+
+    # get_secondary ##########################################################
+    def get_secondary(self):
+        """Gets the secondary SocketBridge object.
+
+        The only difference between the primary and secondary SocketBridge
+        objects is their direction of communication.  Neither object has
+        priority over the other.
+        """
+        return self.__secondary_bridge
+
+    # close ##################################################################
+    def close(self):
+        """Closes this SocketBridgePair.
+
+        Since both SocketBridge objects refer to the same IndirectSocket
+        objects, closing one SocketBridge has the effect of automatically
+        closing the other.
+        """
+        self.get_primary().close()
+
+############################
+# PortToSocketBridgeServer #
+############################
+class PortToSocketBridgeServer(threading.Thread):
     """A class that bridges inbound ports with outbound sockets."""
 
     def __init__(self, in_trans_type, in_address, out_trans_type, out_address, listen = 5):
+        threading.Thread.__init__(self)
 
         # Outbound socket information.
         self.__out_socket_type  = to_socket_type(out_trans_type)
         self.__out_address      = to_address(out_address)
-        self.__outbound_sockets = []
 
-        # Get all meaningful information needed to create a socket.
+        # Get all meaningful information needed to create a socket to listen on.
         self.__in_socket_type  = to_socket_type(in_trans_type)
         self.__in_address      = to_address(in_address)
-        self.__in_listen          = listen
+        self.__in_listen       = listen
         self.__inbound_socket  = None
 
         # Prepare a socket to listen on the inbound port.
+        self.__create_inbound_socket()
 
     def __create_inbound_socket(self):
         if self.__inbound_socket is None:
@@ -100,12 +280,3 @@ class PortToSocketBridge(object):
             initialize_inbound_socket(self.__inbound_socket,
                                       self.__in_address,
                                       self.__in_listen)
-
-    def __create_outbound_socket(self):
-        return socket.socket(socket.AF_INET, self.__out_socket_type)
-
-    def __register_outbound_socket(self, sock):
-        if sock is not None:
-            self.__outbound_sockets.append(sock)
-            return True
-        return False
