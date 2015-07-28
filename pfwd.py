@@ -47,7 +47,15 @@ def to_socket_type(trans_type):
 # to_address #
 ##############
 def to_address(addr):
-    """Converts a socket address or port to a tuple.  Tuples are assumed to be valid."""
+    """Converts a socket address or port to a tuple.  Tuples are assumed to be valid.
+
+    This method takes tuples, strings, and integers.  The function's return
+    value should be of the form (host_or_ip, port_number).
+
+    Acceptable strings are in the form of "host_or_ip:port_number".
+    Tuples must be of length 2.  Tuples are returned unmodified.
+    If a single integer X is passed, then this function returns ("", X).
+    """
 
     # If this is a string, convert it to a valid tuple: (address, port)
     if isinstance(addr, basestring):
@@ -68,6 +76,7 @@ def to_address(addr):
 # initialize_server_socket #
 ############################
 def initialize_server_socket(sock, address_or_port, listen):
+    assert isinstance(sock, socket.socket)
     if sock is not None:
         sock.bind(to_address(address_or_port))
         sock.listen(listen)
@@ -94,6 +103,8 @@ class IndirectSocket(object):
     def __init__(self, sock=None):
         if not isinstance(sock, socket.socket):
             sock = DummySocket.SOCKET
+
+        assert isinstance(sock, socket.socket)
         self.__socket = sock
 
     # socket #################################################################
@@ -126,6 +137,9 @@ class SocketBridge(object):
             fsock = IndirectSocket(fsock)
         if isinstance(tsock, socket.socket):
             tsock = IndirectSocket(tsock)
+
+        assert isinstance(fsock, IndirectSocket)
+        assert isinstance(tsock, IndirectSocket)
 
         self.__from_socket_indirect = fsock
         self.__to_socket_indirect   = tsock
@@ -190,11 +204,24 @@ class SocketBridge(object):
     def set_twin(self, t=None):
         """Sets the twin for this SocketBridge, if it is a potential twin.
 
-        The other SocketBridge object uses this object as its twin.
+        The other SocketBridge object uses this object as its twin.  If a twin
+        object is not provided, one is automatically created and set.  If a twin
+        is already set, this method does nothing.
+
+        Returns the value of t.  If no twin is set, and t is not provided,
+        then this method returns the reference to the newly created twin.
         """
-        if self.is_valid_twin(t) and self.get_twin() is None:
+
+        if self.get_twin() is None:
+            if t is None:
+                t = self.create_twin()
+
+            assert self.is_valid_twin(t)
+
             self.__twin = t
             t.__twin    = self
+
+        return t
 
     # create_twin ############################################################
     def create_twin(self):
@@ -218,9 +245,16 @@ class SocketBridge(object):
 class SocketBridgePair(object):
 
     # Constructor ############################################################
-    def __init__(self, bridge):
-        self.__primary_bridge   = bridge
-        self.__secondary_bridge = bridge.create_twin()
+    def __init__(self, primary, secondary=None):
+        assert isinstance(primary, SocketBridge) and primary.get_twin() is None
+
+        if secondary is None:
+            secondary = primary.create_twin()
+
+        # This will force us to error out if the secondary
+        # bridge is not a twin of the first.
+        self.__primary_bridge   = primary
+        self.__secondary_bridge = primary.set_twin(secondary)
 
     # get_primary ############################################################
     def get_primary(self):
@@ -258,7 +292,8 @@ class SocketBridgePair(object):
 class PortToSocketBridgeServer(threading.Thread):
     """A class that bridges inbound ports with outbound sockets."""
 
-    def __init__(self, in_trans_type, in_address, out_trans_type, out_address, listen = 5):
+    # Constructor ############################################################
+    def __init__(self, in_trans_type, in_address, out_trans_type, out_address, listen=5):
         threading.Thread.__init__(self)
 
         # Outbound socket information.
@@ -266,17 +301,20 @@ class PortToSocketBridgeServer(threading.Thread):
         self.__out_address      = to_address(out_address)
 
         # Get all meaningful information needed to create a socket to listen on.
-        self.__in_socket_type  = to_socket_type(in_trans_type)
-        self.__in_address      = to_address(in_address)
-        self.__in_listen       = listen
-        self.__inbound_socket  = None
+        self.__server_socket_type = to_socket_type(in_trans_type)
+        self.__server_address     = to_address(in_address)
+        self.__server_listen      = listen
+        self.__server_socket  = None
 
         # Prepare a socket to listen on the inbound port.
-        self.__create_inbound_socket()
+        self.__create_server_socket()
 
-    def __create_inbound_socket(self):
-        if self.__inbound_socket is None:
-            self.__inbound_socket = socket.socket(socket.AF_INET, self.__in_socket_type)
-            initialize_inbound_socket(self.__inbound_socket,
-                                      self.__in_address,
-                                      self.__in_listen)
+    # __create_server_socket #################################################
+    def __create_server_socket(self):
+        """Creates the server socket, if one doesn't already exist."""
+        if self.__server_socket is None:
+            self.__server_socket = socket.socket(socket.AF_INET,
+                                                 self.__server_socket_type)
+            initialize_server_socket(self.__server_socket,
+                                     self.__server_address,
+                                     self.__server_listen)
