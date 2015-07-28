@@ -1,6 +1,9 @@
 # Imports
 import socket
 
+# Personal imports
+import devnull
+
 ###############
 # DummySocket #
 ###############
