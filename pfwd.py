@@ -87,28 +87,6 @@ def initialize_server_socket(sock, address_or_port, listen):
 #             #
 ###############
 
-############
-# SocketEx #
-############
-class SocketEx(socket.socket):
-    """Extended socket class.  Used to hold onto metadata."""
-
-    def __init__(self, family=socket.AF_INET, type_=socket.SOCK_STREAM, proto=0):
-        socket.socket.__init__(self, family, type, proto)
-
-        self.__family   = family
-        self.__type     = type_
-        self.__protocol = proto
-
-    def get_family(self):
-        return self.__family
-
-    def get_type(self):
-        return self.__type
-
-    def get_protocol(self):
-        return self.__protocol
-
 ##################
 # IndirectSocket #
 ##################
@@ -257,9 +235,19 @@ class SocketBridge(object):
 
         if self.get_twin() is not None:
             return self.get_twin()
+
+        # Ensure that the twin is of the same type as the original.
         else:
-            return SocketBridge(self.get_to_socket_indirect(),
-                                self.get_from_socket_indirect())
+            return type(self)(self.get_to_socket_indirect(),
+                              self.get_from_socket_indirect())
+
+class TCPSocketBridge(SocketBridge):
+    def __init__(self, fsock, tsock):
+        SocketBridge.__init__(self, fsock, tsock)
+
+class UDPSocketBridge(SocketBridge):
+    def __init__(self, fsock, tsock):
+        SocketBridge.__init__(self, fsock, tsock)
 
 ####################
 # SocketBridgePair #
