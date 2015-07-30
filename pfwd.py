@@ -25,27 +25,11 @@ if sys.version_info[0] > 2:
 #               #
 #################
 
-##################
-# to_socket_type #
-##################
-def to_socket_type(trans_type):
-    """Converts a "transmission type" string to a socket.SOCK_* constant."""
+# coalesce ###################################################################
+def coalesce(obj, f_expr):
+    return obj if obj else f_expr()
 
-    # Logic used to see if the transmission type is explicitly UDP.
-    def is_definitely_udp(tt):
-        if isinstance(tt, basestring):
-            tt = tt.lower()
-        return tt == "udp" or tt == socket.SOCK_DGRAM
-
-    # Default to TCP.  UDP must be explicitly specified.
-    if is_definitely_udp(trans_type):
-        return socket.SOCK_DGRAM
-    else:
-        return socket.SOCK_STREAM
-
-##############
-# to_address #
-##############
+# to_address #################################################################
 def to_address(addr):
     """Converts a socket address or port to a tuple.  Tuples are assumed to be valid.
 
@@ -189,7 +173,7 @@ class SocketBridge(object):
         must move in the exact opposite of the other SocketBridge's
         direction.  Also, they must use the same IndirectSocket objects.
         """
-        if isinstance(t, SocketBridge):
+        if isinstance(t, type(self)):
             if self.get_from_socket_indirect() is t.get_to_socket_indirect():
                 if self.get_to_socket_indirect() is t.get_from_socket_indirect():
                     return True
@@ -213,8 +197,7 @@ class SocketBridge(object):
         """
 
         if self.get_twin() is None:
-            if t is None:
-                t = self.create_twin()
+            t = coalesce(t, self.create_twin)
 
             assert self.is_valid_twin(t)
 
@@ -241,14 +224,6 @@ class SocketBridge(object):
             return type(self)(self.get_to_socket_indirect(),
                               self.get_from_socket_indirect())
 
-class TCPSocketBridge(SocketBridge):
-    def __init__(self, fsock, tsock):
-        SocketBridge.__init__(self, fsock, tsock)
-
-class UDPSocketBridge(SocketBridge):
-    def __init__(self, fsock, tsock):
-        SocketBridge.__init__(self, fsock, tsock)
-
 ####################
 # SocketBridgePair #
 ####################
@@ -257,6 +232,8 @@ class SocketBridgePair(object):
     # Constructor ############################################################
     def __init__(self, primary, secondary=None):
         assert isinstance(primary, SocketBridge) and primary.get_twin() is None
+
+        secondary = coalesce(secondary, primary.create_twin)
 
         if secondary is None:
             secondary = primary.create_twin()
@@ -328,15 +305,20 @@ class PortToSocketBridgeServer(BaseThreadEx):
     """
 
     # Constructor ############################################################
-    def __init__(self, in_trans_type, in_address, out_trans_type, out_address, listen=5):
+    def __init__(self, transmission_type, in_address, out_address, listen=5):
         BaseThreadEx.__init__(self)
 
+        # Bridge information.
+        self.__socket_type      = to_socket_type(transmission_type)
+
+        # Ignore the listen parameter if we're using UDP.
+        if self.__socket_type == socket.SOCK_DGRAM:
+            listen = None
+
         # Outbound socket information.
-        self.__out_socket_type  = to_socket_type(out_trans_type)
         self.__out_address      = to_address(out_address)
 
         # Get all meaningful information needed to create a socket to listen on.
-        self.__server_socket_type = to_socket_type(in_trans_type)
         self.__server_address     = to_address(in_address)
         self.__server_listen      = listen
         self.__server_socket      = None
@@ -356,17 +338,6 @@ class PortToSocketBridgeServer(BaseThreadEx):
 
     def __create_outbound_socket(self):
         sock = socket.socket(socket.AF_INET, self.__out_socket_type)
-        sock.connect
 
     def get_server_socket(self):
         return self.__server_socket
-
-    # run ####################################################################
-    def run(self):
-        """Thread entry point."""
-        while self.should_stay_alive():
-
-            # Wait for an incoming connection.
-            connection_socket, addr = self.get_server_socket().accept()
-            print "Received incoming connection from {0}".format(addr)
-            pass
