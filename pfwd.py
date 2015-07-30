@@ -56,20 +56,43 @@ def to_address(addr):
     else:
         raise TypeError("A tuple of length 2 was expected here.")
 
-############################
-# initialize_server_socket #
-############################
-def initialize_server_socket(sock, address_or_port, listen):
-    assert isinstance(sock, socket.socket)
-    if sock is not None:
-        sock.bind(to_address(address_or_port))
-        sock.listen(listen)
+# new_socket #################################################################
+def new_socket(*args):
+    """Creates a new socket.
+
+    I know I can instantiate sockets directly, but in the event I wish to
+    change the logic of how every socket is created, I can implement those
+    changes here, instead of changing every line of code where a socket is
+    created.
+    """
+    return socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
 ###############
 #             #
 #   Classes   #
 #             #
 ###############
+
+################
+# BaseThreadEx #
+################
+class BaseThreadEx(threading.Thread):
+
+    # Constructor ############################################################
+    def __init__(self):
+        threading.Thread.__init__(self)
+        self.__should_stay_alive = True
+
+    # should_stay_alive ######################################################
+    def should_stay_alive(self):
+        """If your thread is running in a loop, use this to determine whether
+        or not it should stay alive."""
+        return self.__should_stay_alive
+
+    # kill_passively #########################################################
+    def kill_passively(self):
+        """States the intent that you no longer want this thread to run."""
+        self.__should_stay_alive = False
 
 ##################
 # IndirectSocket #
@@ -111,59 +134,62 @@ class IndirectSocket(object):
 ################
 # SocketBridge #
 ################
-class SocketBridge(object):
+class SocketBridge(BaseThreadEx):
 
     # Constructor ############################################################
-    def __init__(self, fsock, tsock):
+    def __init__(self, recv_sock, send_sock, buffer_size=512):
+        BaseThreadEx.__init__(self)
 
         # Convert any sockets to indirect sockets.
-        if isinstance(fsock, socket.socket):
-            fsock = IndirectSocket(fsock)
-        if isinstance(tsock, socket.socket):
-            tsock = IndirectSocket(tsock)
+        if isinstance(recv_sock, socket.socket):
+            recv_sock = IndirectSocket(recv_sock)
+        if isinstance(send_sock, socket.socket):
+            send_sock = IndirectSocket(send_sock)
 
-        assert isinstance(fsock, IndirectSocket)
-        assert isinstance(tsock, IndirectSocket)
+        assert isinstance(recv_sock, IndirectSocket)
+        assert isinstance(send_sock, IndirectSocket)
+        assert isinstance(buffer_size, int)
 
-        self.__from_socket_indirect = fsock
-        self.__to_socket_indirect   = tsock
+        self.__recv_socket_indirect = recv_sock
+        self.__send_socket_indirect = send_sock
+        self.__buffer_size          = buffer_size
         self.__twin                 = None
 
-    # get_from_socket_indirect ###############################################
-    def get_from_socket_indirect(self):
-        """Gets the "from" IndirectSocket object associated with this bridge."""
-        return self.__from_socket_indirect
+    # get_recv_socket_indirect ###############################################
+    def get_recv_socket_indirect(self):
+        """Gets the "recv" IndirectSocket object associated with this bridge."""
+        return self.__recv_socket_indirect
 
-    # get_to_socket_indirect #################################################
-    def get_to_socket_indirect(self):
-        """Gets the "to" IndirectSocket object associated with this bridge."""
-        return self.__to_socket_indirect
+    # get_send_socket_indirect ###############################################
+    def get_send_socket_indirect(self):
+        """Gets the "send" IndirectSocket object associated with this bridge."""
+        return self.__send_socket_indirect
 
-    # get_from_socket ########################################################
-    def get_from_socket(self):
+    # get_recv_socket ########################################################
+    def get_recv_socket(self):
         """Gets the actual "from" socket."""
-        return self.get_from_socket_indirect().socket()
+        return self.get_recv_socket_indirect().socket()
 
-    # get_to_socket ##########################################################
-    def get_to_socket(self):
-        """Gets the actual "to" socket."""
-        return self.get_to_socket_indirect().socket()
+    # get_send_socket ########################################################
+    def get_send_socket(self):
+        """Gets the actual "send" socket."""
+        return self.get_send_socket_indirect().socket()
 
     # close ##################################################################
     def close(self):
         """Closes this bridge, releasing its associated sockets."""
-        self.get_from_socket_indirect().close()
-        self.get_to_socket_indirect().close()
+        self.get_recv_socket_indirect().close()
+        self.get_send_socket_indirect().close()
 
     # is_valid_bridge ########################################################
     def is_valid_bridge(self):
         """Checks to see if this bridge is valid.
 
-        A valid bridge is a bridge such that its to and from sockets are
+        A valid bridge is a bridge such that its send and recv sockets are
         not dummy sockets.
         """
-        return self.get_from_socket_indirect().is_valid_socket() and \
-               self.get_to_socket_indirect().is_valid_socket()
+        return self.get_recv_socket_indirect().is_valid_socket() and \
+               self.get_send_socket_indirect().is_valid_socket()
 
     # is_valid_twin ##########################################################
     def is_valid_twin(self, t):
@@ -174,8 +200,8 @@ class SocketBridge(object):
         direction.  Also, they must use the same IndirectSocket objects.
         """
         if isinstance(t, type(self)):
-            if self.get_from_socket_indirect() is t.get_to_socket_indirect():
-                if self.get_to_socket_indirect() is t.get_from_socket_indirect():
+            if self.get_recv_socket_indirect() is t.get_send_socket_indirect():
+                if self.get_send_socket_indirect() is t.get_recv_socket_indirect():
                     return True
         return False
 
@@ -221,8 +247,30 @@ class SocketBridge(object):
 
         # Ensure that the twin is of the same type as the original.
         else:
-            return type(self)(self.get_to_socket_indirect(),
-                              self.get_from_socket_indirect())
+            return type(self)(self.get_send_socket_indirect(),
+                              self.get_recv_socket_indirect())
+
+    def get_buffer_size(self):
+        return self.__buffer_size
+
+    def __recv(self):
+        return self.get_recv_socket().recv(self.get_buffer_size())
+
+    def __send(message):
+        return self.get_send_socket().send(message)
+
+    # wait_for_new_data_and_send #############################################
+    def wait_for_new_data_and_send(self):
+        bytes_sent = 0
+        data = self.__recv()
+        if data:
+            bytes_sent = self.__send(data)
+        return bytes_sent
+
+    def run(self):
+        while self.should_stay_alive():
+            self.wait_for_new_data_and_send()
+
 
 ####################
 # SocketBridgePair #
@@ -234,9 +282,6 @@ class SocketBridgePair(object):
         assert isinstance(primary, SocketBridge) and primary.get_twin() is None
 
         secondary = coalesce(secondary, primary.create_twin)
-
-        if secondary is None:
-            secondary = primary.create_twin()
 
         # This will force us to error out if the secondary
         # bridge is not a twin of the first.
@@ -273,27 +318,6 @@ class SocketBridgePair(object):
         """
         self.get_primary().close()
 
-################
-# BaseThreadEx #
-################
-class BaseThreadEx(threading.Thread):
-
-    # Constructor ############################################################
-    def __init__(self):
-        threading.Thread.__init__(self)
-        self.__should_stay_alive = True
-
-    # should_stay_alive ######################################################
-    def should_stay_alive(self):
-        """If your thread is running in a loop, use this to determine whether
-        or not it should stay alive."""
-        return self.__should_stay_alive
-
-    # kill_passively #########################################################
-    def kill_passively(self):
-        """States the intent that you no longer want this thread to run."""
-        self.__should_stay_alive = False
-
 ############################
 # PortToSocketBridgeServer #
 ############################
@@ -305,15 +329,8 @@ class PortToSocketBridgeServer(BaseThreadEx):
     """
 
     # Constructor ############################################################
-    def __init__(self, transmission_type, in_address, out_address, listen=5):
+    def __init__(self, in_address, out_address, listen=5):
         BaseThreadEx.__init__(self)
-
-        # Bridge information.
-        self.__socket_type      = to_socket_type(transmission_type)
-
-        # Ignore the listen parameter if we're using UDP.
-        if self.__socket_type == socket.SOCK_DGRAM:
-            listen = None
 
         # Outbound socket information.
         self.__out_address      = to_address(out_address)
@@ -330,14 +347,18 @@ class PortToSocketBridgeServer(BaseThreadEx):
     def __create_server_socket(self):
         """Creates the server socket, if one doesn't already exist."""
         if self.__server_socket is None:
-            self.__server_socket = socket.socket(socket.AF_INET,
-                                                 self.__server_socket_type)
-            initialize_server_socket(self.__server_socket,
-                                     self.__server_address,
-                                     self.__server_listen)
+            self.__server_socket = new_socket()
+            self.__server_socket.bind(self.__server_address)
+            self.__server_socket.listen(self.__server_listen)
 
     def __create_outbound_socket(self):
-        sock = socket.socket(socket.AF_INET, self.__out_socket_type)
+        s = new_socket()
+        s.connect(self.__out_address)
+
+    def __wait_for_new_socket_bridge_pair(self):
+        in_sock, in_addr = self.get_server_socket().accept()
+        out_sock = self.__create_outbound_socket()
+        return (in_addr, SocketBridgePair(SocketBridge(in_sock, out_sock)))
 
     def get_server_socket(self):
         return self.__server_socket
