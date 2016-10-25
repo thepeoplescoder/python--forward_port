@@ -172,7 +172,8 @@ class ListenAndForward(object):         # so that we can
         finally:
             self.__shutdown()
 
-# A mixin class to allow
+# A mixin class to allow ListenAndForward instances
+# to handle forwarding in a separate thread.
 class ThreadingMixIn(object):
 
     # __init__ ############################################
