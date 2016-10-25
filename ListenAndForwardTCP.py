@@ -1,6 +1,6 @@
 import functools
+import socket
 from six import print_ as _print
-import debugsocket as socket
 from ListenAndForward import ListenAndForward, ThreadingMixIn
 from TCPConnection import TCPConnection
 
