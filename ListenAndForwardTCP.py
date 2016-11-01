@@ -3,18 +3,29 @@ import socket
 from six import print_ as _print
 from ListenAndForward import ListenAndForward, ThreadingMixIn
 from TCPConnection import TCPConnection
+from closureutil import WrappedClosure
 
 # Listening and forwarding via TCP.
+ListenAndForwardTCP = None
 class ListenAndForwardTCP(ListenAndForward):
-    def __init__(self, my_address, dest_address, **kwargs):
-        super(ListenAndForwardTCP, self).__init__(my_address, dest_address)
-        self.__server_socket = None
-        self.__backlog = kwargs.get("backlog", 5)
+    _Self = lambda: ListenAndForwardTCP
 
-        # Set a callback if we were given one.
-        log_data_callback = kwargs.get("log_data", kwargs.get("log_data_callback", None))
-        if log_data_callback:
-            self.log_data = functools.partial(log_data_callback, self)
+    # __init__ ############################################
+    @WrappedClosure
+    def __init__(Self=_Self):
+
+        # Real constructor.
+        def __init__(self, my_address, dest_address, **kwargs):
+            super(Self(), self).__init__(my_address, dest_address)
+            self.__server_socket = None
+            self.__backlog = kwargs.get("backlog", 5)
+
+            # Set a callback if we were given one.
+            log_data_callback = kwargs.get("log_data", kwargs.get("log_data_callback", None))
+            if log_data_callback:
+                self.log_data = functools.partial(log_data_callback, self)
+
+        return __init__
 
     # get_server_socket ###################################
     def get_server_socket(self):
@@ -56,6 +67,8 @@ class ListenAndForwardTCP(ListenAndForward):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.connect(dest_address)
         return TCPConnection(sock, dest_address)
+
+    WrappedClosure.unwrap_all(locals())
 
 # A version of ListenAndForwardTCP that supports threading.
 class ListenAndForwardTCPThreading(ThreadingMixIn, ListenAndForwardTCP):
