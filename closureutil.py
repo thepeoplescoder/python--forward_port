@@ -39,5 +39,8 @@ class WrappedClosure(object):
             # I'm checking the exact type on purpose.
             # What if this class were subclassed and different
             # behavior was desired for each differing type?
+            #
+            # Also, by design, I want each subclass to handle their own types
+            # individually.
             if type(scope[variable]) is cls:
                 scope[variable] = scope[variable]() # Reassign the return value to the same name.
