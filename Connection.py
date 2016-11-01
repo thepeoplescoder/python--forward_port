@@ -1,17 +1,26 @@
 import six
 
+from closureutil import WrappedClosure
+
 # An "abstract" representation of a connection.
-Connection = None
-class Connection(six.Iterator):
-    _Self = lambda: Connection
+Connection = None                   # In the event that I want to rename
+class Connection(six.Iterator):     # this class, I only have to change the name
+    _Self = lambda: Connection      # in three places.
 
     # __init__ ############################################
-    def __init__(self, sock, sockaddr, Self=_Self):
-        if type(self) is Self():
-            raise TypeError("Direct instantiation of this class is prohibited.")
+    @WrappedClosure
+    def __init__(Self=_Self):
+        # This is the actual constructor.  I put it in a closure so
+        # I can get a reference to this exact class for the type check.
+        def __init__(self, sock, sockaddr):
+            if type(self) is Self():
+                raise TypeError("Direct instantiation of this class is prohibited.")
 
-        self._socket_address = sockaddr
-        self._socket = sock
+            self._socket_address = sockaddr
+            self._socket = sock
+
+        # Return the actual constructor to the caller.
+        return __init__
 
     # __iter__ ############################################
     def __iter__(self):
@@ -53,3 +62,7 @@ class Connection(six.Iterator):
     def send(self, data):
         """Send data over the connection."""
         raise NotImplementedError("Please override this method in a subclass.")
+
+    # This should be called before the first WrappedClosure method
+    # is actually needed.
+    WrappedClosure.unwrap_all(locals())

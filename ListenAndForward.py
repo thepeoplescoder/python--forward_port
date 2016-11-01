@@ -1,20 +1,26 @@
 import debugsocket as socket
 import threading
 
+from closureutil import WrappedClosure
+
 # An "abstract" implementation for listening on a port and forwarding its data.
 ListenAndForward = None                 # Declare the name now,
 class ListenAndForward(object):         # so that we can
     _Self = lambda: ListenAndForward    # do this.
 
     # __init__ ############################################
-    def __init__(self, listen_on, forward_to, Self=_Self):
-        if type(self) is Self():
-            raise TypeError("Direct instantiation of %s prohibited." % (type(self).__name__,))
+    @WrappedClosure
+    def __init__(Self=_Self):
+        # This is the actual constructor.
+        def __init__(self, listen_on, forward_to):
+            if type(self) is Self():
+                raise TypeError("Direct instantiation of %s prohibited." % (type(self).__name__,))
 
-        # Save general information for this task.
-        self.__running      = False
-        self.__dest_address = forward_to
-        self._my_address    = listen_on     # get_server_socket may update this.
+            # Save general information for this task.
+            self.__running = False
+            self.__dest_address = forward_to
+            self._my_address = listen_on        # get_server_socket may update this.
+        return __init__
 
     # __repr__ ############################################
     def __repr__(self):
@@ -171,6 +177,8 @@ class ListenAndForward(object):         # so that we can
         # Shut down our object.
         finally:
             self.__shutdown()
+
+    WrappedClosure.unwrap_all(locals())
 
 # A mixin class to allow ListenAndForward instances
 # to handle forwarding in a separate thread.
