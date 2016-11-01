@@ -1,7 +1,6 @@
 class WrappedClosure(object):
-    """This class is a decorator for instance methods.  It is used to
-    mark methods that wrap the actual methods in closures, to be
-    unwrapped later."""
+    """This class is a decorator whose purpose is to mark methods
+    that wrap the actual methods in closures, to be unwrapped later."""
 
     # __init__ ############################################
     def __init__(self, method):
