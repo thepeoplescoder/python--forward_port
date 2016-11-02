@@ -161,8 +161,8 @@ class ListenAndForward(object):         # so that we can
         a loop that does what the name of the method says ;)"""
         try:
             try:
-                new_connection = self.get_new_source_connection
                 forward_one    = self.handle_forwarding_once_and_cleanup
+                new_connection = self.get_new_source_connection
 
                 # Keep running until explicitly killed.
                 self.__running = True                       # I'm going in!!!
